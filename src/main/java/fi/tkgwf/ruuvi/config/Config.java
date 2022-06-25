@@ -3,8 +3,6 @@ package fi.tkgwf.ruuvi.config;
 import fi.tkgwf.ruuvi.db.DBConnection;
 import fi.tkgwf.ruuvi.db.DummyDBConnection;
 import fi.tkgwf.ruuvi.db.InfluxDBConnection;
-import fi.tkgwf.ruuvi.db.LegacyInfluxDBConnection;
-import fi.tkgwf.ruuvi.db.PrometheusExporter;
 import fi.tkgwf.ruuvi.strategy.LimitingStrategy;
 import fi.tkgwf.ruuvi.strategy.impl.DefaultDiscardingWithMotionSensitivityStrategy;
 import fi.tkgwf.ruuvi.strategy.impl.DiscardUntilEnoughTimeHasElapsedStrategy;
@@ -49,8 +47,8 @@ public abstract class Config {
     private static String influxUrl;
     private static String influxDatabase;
     private static String influxMeasurement;
-    private static String influxUser;
-    private static String influxPassword;
+    private static String influxOrg;
+    private static String influxToken;
     private static String influxRetentionPolicy;
     private static boolean influxGzip;
     private static boolean influxBatch;
@@ -75,6 +73,10 @@ public abstract class Config {
     private static Map<String, TagProperties> tagProperties;
     private static Function<String, File> configFileFinder;
     private static int prometheusHttpPort;
+    private static String MQTTbrokerURL;
+    private static String MQTTclientId = "Ruuvi";
+    private static String MQTTusername = "shelly";
+    private static String MQTTpassword = "shelly1";
 
     static {
         reload();
@@ -95,8 +97,8 @@ public abstract class Config {
         influxUrl = "http://localhost:8086";
         influxDatabase = "ruuvi";
         influxMeasurement = "ruuvi_measurements";
-        influxUser = "ruuvi";
-        influxPassword = "ruuvi";
+        influxOrg = "ruuvi";
+        influxToken = "ruuvi";
         influxRetentionPolicy = "autogen";
         influxGzip = true;
         influxBatch = true;
@@ -119,6 +121,10 @@ public abstract class Config {
         defaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep = 3;
         tagProperties = new HashMap<>();
         prometheusHttpPort = 9155;
+        MQTTbrokerURL = "tcp://localhost:1883";
+        MQTTclientId = "Ruuvi";
+        MQTTusername = "";
+        MQTTpassword = "";
     }
 
     private static void readConfig() {
@@ -139,8 +145,8 @@ public abstract class Config {
         influxUrl = props.getProperty("influxUrl", influxUrl);
         influxDatabase = props.getProperty("influxDatabase", influxDatabase);
         influxMeasurement = props.getProperty("influxMeasurement", influxMeasurement);
-        influxUser = props.getProperty("influxUser", influxUser);
-        influxPassword = props.getProperty("influxPassword", influxPassword);
+        influxOrg = props.getProperty("influxOrg", influxOrg);
+        influxToken = props.getProperty("influxToken", influxToken);
         measurementUpdateLimit = parseLong(props, "measurementUpdateLimit", measurementUpdateLimit);
         storageMethod = props.getProperty("storage.method", storageMethod);
         storageValues = props.getProperty("storage.values", storageValues);
@@ -157,10 +163,18 @@ public abstract class Config {
         influxBatchMaxSize = parseInteger(props, "influxBatchMaxSize", influxBatchMaxSize);
         influxBatchMaxTimeMs = parseInteger(props, "influxBatchMaxTime", influxBatchMaxTimeMs);
         limitingStrategy = parseLimitingStrategy(props);
-        defaultWithMotionSensitivityStrategyThreshold = parseDouble(props, "limitingStrategy.defaultWithMotionSensitivity.threshold", defaultWithMotionSensitivityStrategyThreshold);
-        defaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep = parseInteger(props, "limitingStrategy.defaultWithMotionSensitivity.numberOfMeasurementsToKeep", defaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep);
+        defaultWithMotionSensitivityStrategyThreshold = parseDouble(props,
+                "limitingStrategy.defaultWithMotionSensitivity.threshold",
+                defaultWithMotionSensitivityStrategyThreshold);
+        defaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep = parseInteger(props,
+                "limitingStrategy.defaultWithMotionSensitivity.numberOfMeasurementsToKeep",
+                defaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep);
         tagProperties = parseTagProperties(props);
         prometheusHttpPort = parseInteger(props, "prometheusHttpPort", prometheusHttpPort);
+        MQTTbrokerURL = props.getProperty("MQTTbrokerURL", MQTTbrokerURL);
+        MQTTclientId = props.getProperty("MQTTclientId", MQTTclientId);
+        MQTTusername = props.getProperty("MQTTusername", MQTTusername);
+        MQTTpassword = props.getProperty("MQTTpassword", MQTTpassword);
         validateConfig();
     }
 
@@ -169,13 +183,14 @@ public abstract class Config {
             switch (storageValues) {
                 case "whitelist":
                     throw new IllegalStateException("You have selected no fields to be stored into the InfluxDB. " +
-                        "Please set the storage.values.list property or select another storage.values option. " +
-                        "See MEASUREMENTS.md for the available fields and ruuvi-collector.properties.example for " +
-                        "the possible values of the storage.values property.");
+                            "Please set the storage.values.list property or select another storage.values option. " +
+                            "See MEASUREMENTS.md for the available fields and ruuvi-collector.properties.example for " +
+                            "the possible values of the storage.values property.");
                 case "blacklist":
                     LOG.warn("You have set storage.values=blacklist but left storage.values.list empty. " +
-                        "This is essentially the same as setting storage.values=extended. If this is intentional, " +
-                        "you may ignore this message.");
+                            "This is essentially the same as setting storage.values=extended. If this is intentional, "
+                            +
+                            "you may ignore this message.");
                     break;
             }
         }
@@ -203,10 +218,10 @@ public abstract class Config {
 
     private static Map<String, TagProperties> parseTagProperties(final Properties props) {
         final Map<String, Map<String, String>> tagProps = props.entrySet().stream()
-            .map(e -> Pair.of(String.valueOf(e.getKey()), String.valueOf(e.getValue())))
-            .filter(p -> p.getLeft().startsWith("tag."))
-            .collect(Collectors.groupingBy(extractMacAddressFromTagPropertyName(),
-                toMap(extractKeyFromTagPropertyName(), Pair::getRight)));
+                .map(e -> Pair.of(String.valueOf(e.getKey()), String.valueOf(e.getValue())))
+                .filter(p -> p.getLeft().startsWith("tag."))
+                .collect(Collectors.groupingBy(extractMacAddressFromTagPropertyName(),
+                        toMap(extractKeyFromTagPropertyName(), Pair::getRight)));
         return tagProps.entrySet().stream().map(e -> {
             final TagProperties.Builder builder = TagProperties.builder(e.getKey());
             e.getValue().forEach(builder::add);
@@ -234,11 +249,11 @@ public abstract class Config {
 
     private static Collection<? extends String> parseFilterMacs(final Properties props) {
         return Optional.ofNullable(props.getProperty("filter.macs"))
-            .map(value -> Arrays.stream(value.split(","))
-                .map(String::trim)
-                .filter(s -> s.length() == 12)
-                .map(String::toUpperCase).collect(toSet()))
-            .orElse(Collections.emptySet());
+                .map(value -> Arrays.stream(value.split(","))
+                        .map(String::trim)
+                        .filter(s -> s.length() == 12)
+                        .map(String::toUpperCase).collect(toSet()))
+                .orElse(Collections.emptySet());
     }
 
     private static Collection<String> parseFilterInfluxDbFields(final Properties props) {
@@ -247,10 +262,10 @@ public abstract class Config {
 
     static Collection<String> parseFilterInfluxDbFields(final String list) {
         return Optional.ofNullable(list)
-            .map(value -> Arrays.stream(value.split(","))
-                .map(String::trim)
-                .collect(toSet()))
-            .orElse(Collections.emptySet());
+                .map(value -> Arrays.stream(value.split(","))
+                        .map(String::trim)
+                        .collect(toSet()))
+                .orElse(Collections.emptySet());
     }
 
     private static Predicate<String> parseFilterMode(final Properties props) {
@@ -264,8 +279,8 @@ public abstract class Config {
                 case "named":
                     if (TAG_NAMES.isEmpty()) {
                         throw new IllegalStateException(
-                        "You have set filter.mode=named but left ruuvi-names.properties empty. " +
-                        "Please select a different filter.mode value or populate ruuvi-names.properties.");
+                                "You have set filter.mode=named but left ruuvi-names.properties empty. " +
+                                        "Please select a different filter.mode value or populate ruuvi-names.properties.");
                     }
                     return TAG_NAMES.keySet()::contains;
             }
@@ -285,7 +300,8 @@ public abstract class Config {
         return parseNumber(props, key, defaultValue, Double::parseDouble);
     }
 
-    private static <N extends Number> N parseNumber(final Properties props, final String key, final N defaultValue, final Function<String, N> parser) {
+    private static <N extends Number> N parseNumber(final Properties props, final String key, final N defaultValue,
+            final Function<String, N> parser) {
         final String value = props.getProperty(key);
         try {
             return Optional.ofNullable(value).map(parser).orElse(defaultValue);
@@ -302,11 +318,15 @@ public abstract class Config {
     private static Function<String, File> defaultConfigFileFinder() {
         return propertiesFileName -> {
             try {
-                final File jarLocation = new File(Config.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath()).getParentFile();
+                final File jarLocation = new File(
+                        Config.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath())
+                        .getParentFile();
                 Optional<File> configFile = findConfigFile(propertiesFileName, jarLocation);
                 if (!configFile.isPresent()) {
-                    // look for config files in the parent directory if none found in the current directory, this is useful during development when
-                    // RuuviCollector can be run from maven target directory directly while the config file sits in the project root
+                    // look for config files in the parent directory if none found in the current
+                    // directory, this is useful during development when
+                    // RuuviCollector can be run from maven target directory directly while the
+                    // config file sits in the project root
                     final File parentFile = jarLocation.getParentFile();
                     configFile = findConfigFile(propertiesFileName, parentFile);
                 }
@@ -319,8 +339,8 @@ public abstract class Config {
 
     private static Optional<File> findConfigFile(String propertiesFileName, File parentFile) {
         return Optional.ofNullable(parentFile.listFiles(f -> f.isFile() && f.getName().equals(propertiesFileName)))
-            .filter(configFiles -> configFiles.length > 0)
-            .map(configFiles -> configFiles[0]);
+                .filter(configFiles -> configFiles.length > 0)
+                .map(configFiles -> configFiles[0]);
     }
 
     private static void readTagNames() {
@@ -356,10 +376,6 @@ public abstract class Config {
         switch (storageMethod) {
             case "influxdb":
                 return new InfluxDBConnection();
-            case "influxdb_legacy":
-                return new LegacyInfluxDBConnection();
-            case "prometheus":
-                return new PrometheusExporter(getPrometheusHttpPort());
             case "dummy":
                 return new DummyDBConnection();
             default:
@@ -372,24 +388,14 @@ public abstract class Config {
         }
     }
 
-    /**
-     * Use {@link #getAllowedInfluxDbFieldsPredicate()} instead.
-     *
-     * @return The value of the storage.values configuration property.
-     */
-    @Deprecated
-    public static String getStorageValues() {
-        return storageValues;
-    }
-
     public static Predicate<String> getAllowedInfluxDbFieldsPredicate() {
         return influxDbFieldFilter;
     }
 
     public static Predicate<String> getAllowedInfluxDbFieldsPredicate(String mac) {
         return Optional.ofNullable(tagProperties.get(mac))
-            .map(TagProperties::getInfluxDbFieldFilter)
-            .orElse(influxDbFieldFilter);
+                .map(TagProperties::getInfluxDbFieldFilter)
+                .orElse(influxDbFieldFilter);
     }
 
     public static String getInfluxUrl() {
@@ -404,12 +410,12 @@ public abstract class Config {
         return influxMeasurement;
     }
 
-    public static String getInfluxUser() {
-        return influxUser;
+    public static String getInfluxOrg() {
+        return influxOrg;
     }
 
-    public static String getInfluxPassword() {
-        return influxPassword;
+    public static String getInfluxToken() {
+        return influxToken;
     }
 
     public static String getInfluxRetentionPolicy() {
@@ -470,8 +476,8 @@ public abstract class Config {
 
     public static LimitingStrategy getLimitingStrategy(String mac) {
         return Optional.ofNullable(tagProperties.get(mac))
-            .map(TagProperties::getLimitingStrategy)
-            .orElse(null);
+                .map(TagProperties::getLimitingStrategy)
+                .orElse(null);
     }
 
     public static Double getDefaultWithMotionSensitivityStrategyThreshold() {
@@ -480,5 +486,21 @@ public abstract class Config {
 
     public static int getDefaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep() {
         return defaultWithMotionSensitivityStrategyNumberOfPreviousMeasurementsToKeep;
+    }
+
+    public static String getMQTTUsername() {
+        return MQTTusername;
+    }
+
+    public static String getMQTTPassword() {
+        return MQTTpassword;
+    }
+
+    public static String getMQTTclientId() {
+        return MQTTclientId;
+    }
+
+    public static String getMQTTbrokerURL() {
+        return MQTTbrokerURL;
     }
 }

@@ -5,7 +5,6 @@ import fi.tkgwf.ruuvi.bean.HCIData;
 import fi.tkgwf.ruuvi.config.Config;
 import fi.tkgwf.ruuvi.handler.BeaconHandler;
 import fi.tkgwf.ruuvi.utils.HCIParser;
-import fi.tkgwf.ruuvi.utils.InfluxDataMigrator;
 import fi.tkgwf.ruuvi.utils.MeasurementValueCalculator;
 import fi.tkgwf.ruuvi.utils.Utils;
 import java.io.BufferedReader;
@@ -22,19 +21,11 @@ public class Main {
     private final BeaconHandler beaconHandler = new BeaconHandler();
 
     public static void main(String[] args) {
-        if (args.length >= 1 && args[0].equalsIgnoreCase("migrate")) {
-            InfluxDataMigrator migrator = new InfluxDataMigrator();
-            migrator.migrate();
-        } else {
-            Main m = new Main();
-            if (!m.run()) {
-                LOG.info("Unclean exit");
-                System.exit(1);
-            }
+        Main m = new Main();
+        if (!m.run()) {
+            LOG.info("Unclean exit");
+            System.exit(1);
         }
-        LOG.info("Clean exit");
-        System.exit(0); // due to a bug in the InfluxDB library, we have to force the exit as a
-                        // workaround. See: https://github.com/influxdata/influxdb-java/issues/359
     }
 
     private BufferedReader startHciListeners() throws IOException {
@@ -78,7 +69,8 @@ public class Main {
             String line, latestMAC = null;
             while ((line = reader.readLine()) != null) {
                 if (line.contains("device: disconnected")) {
-                    LOG.error(line + ": Either the bluetooth device was externally disabled or physically disconnected");
+                    LOG.error(
+                            line + ": Either the bluetooth device was externally disabled or physically disconnected");
                     healthy = false;
                 }
                 if (line.contains("No such device")) {
@@ -91,28 +83,34 @@ public class Main {
                         dataReceived = true;
                         healthy = true;
                     } else {
-                        continue; // skip the unnecessary garbage at beginning containing hcidump version and other junk print
+                        continue; // skip the unnecessary garbage at beginning containing hcidump version and
+                                  // other junk print
                     }
                 }
                 try {
-                    //Read in MAC address from first line
+                    // Read in MAC address from first line
                     if (Utils.hasMacAddress(line)) {
                         latestMAC = Utils.getMacFromLine(line);
                     }
-                    //Apply Mac Address Filtering
+                    // Apply Mac Address Filtering
                     if (Config.isAllowedMAC(latestMAC)) {
                         HCIData hciData = parser.readLine(line);
                         if (hciData != null) {
-                            beaconHandler.handle(hciData).map(MeasurementValueCalculator::calculateAllValues).ifPresent(persistenceService::store);
-                            latestMAC = null; // "reset" the mac to null to avoid misleading MAC addresses when an error happens *after* successfully reading a full packet
+                            beaconHandler.handle(hciData).map(MeasurementValueCalculator::calculateAllValues)
+                                    .ifPresent(persistenceService::store);
+                            latestMAC = null; // "reset" the mac to null to avoid misleading MAC addresses when an error
+                                              // happens *after* successfully reading a full packet
                             healthy = true;
                         }
                     }
                 } catch (Exception ex) {
                     if (latestMAC != null) {
-                        LOG.warn("Uncaught exception while handling measurements from MAC address \"" + latestMAC + "\", if this repeats and this is not a Ruuvitag, try blacklisting it", ex);
+                        LOG.warn("Uncaught exception while handling measurements from MAC address \"" + latestMAC
+                                + "\", if this repeats and this is not a Ruuvitag, try blacklisting it", ex);
                     } else {
-                        LOG.warn("Uncaught exception while handling measurements, this is an unexpected event. Please report this to https://github.com/Scrin/RuuviCollector/issues and include this log", ex);
+                        LOG.warn(
+                                "Uncaught exception while handling measurements, this is an unexpected event. Please report this to https://github.com/Scrin/RuuviCollector/issues and include this log",
+                                ex);
                     }
                     LOG.debug("Offending line: " + line);
                 }

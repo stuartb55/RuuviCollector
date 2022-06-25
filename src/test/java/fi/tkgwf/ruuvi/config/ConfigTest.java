@@ -22,16 +22,14 @@ import static org.junit.jupiter.api.Assertions.fail;
 public class ConfigTest {
 
     public static Function<String, File> configTestFileFinder() {
-        return propertiesFileName -> Optional.ofNullable(Config.class.getResource(String.format("/%s", propertiesFileName)))
-            .map(url -> {
-                try {
-                    return url.toURI();
-                } catch (final URISyntaxException e) {
-                    throw new RuntimeException(e);
-                }
-            })
-            .map(File::new)
-            .orElse(null);
+        return propertiesFileName -> Optional
+                .ofNullable(Config.class.getResource(String.format("/%s", propertiesFileName))).map(url -> {
+                    try {
+                        return url.toURI();
+                    } catch (final URISyntaxException e) {
+                        throw new RuntimeException(e);
+                    }
+                }).map(File::new).orElse(null);
     }
 
     @BeforeEach
@@ -42,11 +40,6 @@ public class ConfigTest {
     @AfterAll
     static void resetConfigAfter() {
         Config.reload(configTestFileFinder());
-    }
-
-    @Test
-    void testDefaultStringValue() {
-        assertEquals("ruuvi", Config.getInfluxUser());
     }
 
     @Test
@@ -62,11 +55,6 @@ public class ConfigTest {
     @Test
     void testDefaultLongValue() {
         assertEquals(9900, Config.getMeasurementUpdateLimit());
-    }
-
-    @Test
-    void testOverriddenStringValue() {
-        assertEquals("testing", Config.getInfluxPassword());
     }
 
     @Test
@@ -105,23 +93,10 @@ public class ConfigTest {
     @Test
     void testLimitingStrategyPerMac() {
         assertTrue(Config.getLimitingStrategy("ABCDEF012345") instanceof DiscardUntilEnoughTimeHasElapsedStrategy);
-        assertTrue(Config.getLimitingStrategy("F1E2D3C4B5A6") instanceof DefaultDiscardingWithMotionSensitivityStrategy);
+        assertTrue(
+                Config.getLimitingStrategy("F1E2D3C4B5A6") instanceof DefaultDiscardingWithMotionSensitivityStrategy);
 
         assertNull(Config.getLimitingStrategy("unknown should get null"));
-    }
-
-    @Test
-    void testRefreshingConfigOnTheFly() {
-        // Assert the default value:
-        assertEquals("ruuvi", Config.getInfluxUser());
-
-        // Load in a new value:
-        final Properties properties = new Properties();
-        properties.put("influxUser", "screw");
-        Config.readConfigFromProperties(properties);
-
-        // Test that it worked:
-        assertEquals("screw", Config.getInfluxUser());
     }
 
     @Test
@@ -179,7 +154,7 @@ public class ConfigTest {
         assertTrue(Config.isAllowedMAC("ABCDEFG"));
         assertFalse(Config.isAllowedMAC(null));
 
-         //Change to named
+        // Change to named
         final Properties properties = new Properties();
         properties.put("filter.mode", "named");
         Config.readConfigFromProperties(properties);

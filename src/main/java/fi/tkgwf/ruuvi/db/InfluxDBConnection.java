@@ -3,61 +3,40 @@ package fi.tkgwf.ruuvi.db;
 import fi.tkgwf.ruuvi.bean.EnhancedRuuviMeasurement;
 import fi.tkgwf.ruuvi.config.Config;
 import fi.tkgwf.ruuvi.utils.InfluxDBConverter;
-import java.util.concurrent.TimeUnit;
-import org.influxdb.InfluxDB;
-import org.influxdb.InfluxDBFactory;
-import org.influxdb.dto.Point;
+import com.influxdb.client.InfluxDBClient;
+import com.influxdb.client.InfluxDBClientFactory;
+import com.influxdb.client.WriteApi;
+import com.influxdb.client.write.Point;
 
 public class InfluxDBConnection implements DBConnection {
 
-    private final InfluxDB influxDB;
+    private final InfluxDBClient influxDBClient;
+    private static final String BUCKET = "ruuvi";
+    private WriteApi writeApi;
 
     public InfluxDBConnection() {
-        this(
-                Config.getInfluxUrl(),
-                Config.getInfluxUser(),
-                Config.getInfluxPassword(),
-                Config.getInfluxDatabase(),
-                Config.getInfluxRetentionPolicy(),
-                Config.isInfluxGzip(),
-                Config.isInfluxBatch(),
-                Config.getInfluxBatchMaxSize(),
-                Config.getInfluxBatchMaxTimeMs()
-        );
+        this(Config.getInfluxUrl(), Config.isInfluxGzip(), Config.getInfluxOrg(), Config.getInfluxToken());
     }
 
-    public InfluxDBConnection(
-            String url,
-            String user,
-            String password,
-            String database,
-            String retentionPolicy,
-            boolean gzip,
-            boolean batch,
-            int batchSize,
-            int batchTime
-    ) {
-        influxDB = InfluxDBFactory.connect(url, user, password).setDatabase(database).setRetentionPolicy(retentionPolicy);
+    public InfluxDBConnection(String url, boolean gzip, String org, String token) {
+        influxDBClient = InfluxDBClientFactory.create(url, token.toCharArray(), org, BUCKET);
+        writeApi = influxDBClient.makeWriteApi();
         if (gzip) {
-            influxDB.enableGzip();
+            influxDBClient.enableGzip();
         } else {
-            influxDB.disableGzip();
-        }
-        if (batch) {
-            influxDB.enableBatch(batchSize, batchTime, TimeUnit.MILLISECONDS);
-        } else {
-            influxDB.disableBatch();
+            influxDBClient.disableGzip();
         }
     }
 
     @Override
     public void save(EnhancedRuuviMeasurement measurement) {
         Point point = InfluxDBConverter.toInflux(measurement);
-        influxDB.write(point);
+        writeApi.writePoint(point);
+        new MqttPublish(measurement);
     }
 
     @Override
     public void close() {
-        influxDB.close();
+        influxDBClient.close();
     }
 }
