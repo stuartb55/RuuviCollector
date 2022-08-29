@@ -32,7 +32,6 @@ public class InfluxDBConnection implements DBConnection {
     public void save(EnhancedRuuviMeasurement measurement) {
         Point point = InfluxDBConverter.toInflux(measurement);
         writeApi.writePoint(point);
-        new MqttPublish(measurement);
     }
 
     @Override
