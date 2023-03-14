@@ -1,0 +1,11 @@
+[Unit]
+Description=BLE Scanning Service
+After=default.target
+[Service]
+Type=simple
+# Ensure the bluetooth interface is in a good state prior to starting the scan
+ExecStartPre=/usr/bin/hciconfig reset
+ExecStart=/usr/bin/hcitool lescan --duplicates --passive
+Restart=always
+[Install]
+WantedBy=multi-user.target
